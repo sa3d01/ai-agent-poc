@@ -1,2 +1,1 @@
-openai==1.12.0
-python-dotenv==1.0.0
+# This project uses no external Python dependencies.
