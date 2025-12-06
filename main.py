@@ -1,144 +1,128 @@
-"""Entry point for the AI agent proof‑of‑concept.
+"""Entry point for the AI agent proof-of-concept.
 
 This script demonstrates how a simple AI agent can:
-
-* Classify a support ticket using a language model.
+* Classify a support ticket using basic keyword heuristics.
 * Generate a professional email response.
 * Determine a basic remediation plan.
 * Execute mock actions based on the ticket intent.
 
-The goal is to showcase the flow end‑to‑end rather than provide a
-production‑ready implementation.
+The goal is to showcase the flow end-to-end rather than provide a production-ready implementation.
 """
 
 import argparse
-import json
-import os
-from typing import Dict, Optional
+from typing import Dict, List
 
-import openai
-from dotenv import load_dotenv
-
+# Import mock functions
 from mock_tools import reset_password, restart_device, unlock_account
-from prompts import classification_prompt, email_prompt
 
 
-def call_llm(prompt: str, text: str) -> str:
-    """Call the OpenAI API (or return a mock response) with the given prompt.
+def classify_ticket(ticket: str) -> Dict[str, float]:
+    """Classify the ticket based on simple keyword heuristics."""
+    text = ticket.lower()
+    intent = "unknown"
+    confidence = 0.5
 
-    If the environment variable `MOCK_LLM` is set to "1", a fixed string is
-    returned instead of calling the real API. Otherwise, the GPT‑4o mini
-    endpoint is used.
-    """
-    # Support mock responses for offline mode or testing without an API key.
-    if os.getenv("MOCK_LLM") == "1":
-        # Return a simple mock classification response in JSON format
-        return "{\"intent\": \"unknown\", \"confidence\": 0.5}"
+    if any(word in text for word in ["password", "login", "credential"]):
+        intent = "password_reset"
+        confidence = 0.9
+    elif "vpn" in text:
+        intent = "vpn_issue"
+        confidence = 0.9
+    elif any(word in text for word in ["printer", "printing", "offline"]):
+        intent = "printer_error"
+        confidence = 0.8
+    elif "lock" in text:
+        intent = "account_locked"
+        confidence = 0.8
 
-    # Load the API key and create an OpenAI client.  Starting with v1.0 of the
-    # openai‑python library, the `openai.ChatCompletion.create` function has been
-    # removed in favor of a client‑based API.  See the migration guide for
-    # details: https://github.com/openai/openai-python/discussions/742
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY environment variable must be set")
-    client = OpenAI(api_key=api_key)
-
-    # Use the new client API to create a chat completion.  We pass the
-    # conversation as a list of role/content dictionaries.  The `response`
-    # object returns messages as objects, so we access `.message.content`.
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt.strip()},
-            {"role": "user", "content": text.strip()},
-        ],
-    )
-    return response.choices[0].message.content
-
-
-def classify_ticket(ticket: str) -> Dict[str, object]:
-    """Classify the ticket and return a JSON with intent and confidence."""
-    result = call_llm(classification_prompt, ticket)
-    try:
-        parsed = json.loads(result)
-        return {
-            "intent": parsed.get("intent", "unknown"),
-            "confidence": float(parsed.get("confidence", 0)),
-        }
-    except (json.JSONDecodeError, ValueError):
-        return {"intent": "unknown", "confidence": 0.0}
+    return {"intent": intent, "confidence": confidence}
 
 
 def generate_email(ticket: str, intent: str) -> str:
-    """Generate a professional email response using an LLM."""
-    return call_llm(email_prompt, f"Ticket: {ticket}\nIntent: {intent}")
-
-
-def plan_actions(intent: str) -> Optional[str]:
-    """Return a human‑readable plan for the given intent."""
-    # In a real system, this would come from RAG + SOPs. For the demo, it's static.
+    """Generate a simple email response based on the intent."""
+    greeting = "Hello,\n\n"
     if intent == "password_reset":
-        return "1) Validate user exists. 2) Call reset_password. 3) Notify user."
+        body = (
+            "We have received your request regarding login difficulties. "
+            "We are resetting your password and will send instructions shortly."
+        )
+    elif intent == "vpn_issue":
+        body = (
+            "We understand you're having trouble connecting to the VPN. "
+            "We're running diagnostics and will inform you once resolved."
+        )
+    elif intent == "printer_error":
+        body = (
+            "We see that you're experiencing printer issues. "
+            "We're working on resolving the connectivity problem."
+        )
+    elif intent == "account_locked":
+        body = (
+            "It looks like your account is locked. "
+            "We're unlocking it now and will notify you once complete."
+        )
+    else:
+        body = (
+            "Thank you for reaching out. We've received your ticket and "
+            "will investigate the issue."
+        )
+    return greeting + body + "\n\nBest regards,\nSupport Team"
+
+
+def plan_actions(intent: str) -> List[Dict[str, str]]:
+    """Return a list of actions to perform based on intent."""
+    if intent == "password_reset":
+        return [{"step": "Reset user password", "action": "reset_password"}]
     if intent == "vpn_issue":
-        return "1) Gather more info on VPN error. 2) Restart device if needed. 3) Escalate if unresolved."
+        return [{"step": "Restart VPN service on user machine", "action": "restart_device"}]
+    if intent == "printer_error":
+        return [{"step": "Restart printer device", "action": "restart_device"}]
     if intent == "account_locked":
-        return "1) Verify identity. 2) Call unlock_account. 3) Advise on security best practices."
-    return None
+        return [{"step": "Unlock user account", "action": "unlock_account"}]
+    return []
 
 
-def execute_mock_actions(intent: str) -> Dict[str, object]:
-    """Execute one of the mock actions based on intent and return a result."""
+def execute_mock_actions(intent: str):
+    """Execute mocked actions based on intent."""
     if intent == "password_reset":
         return reset_password("user@example.com")
     if intent == "vpn_issue":
-        return restart_device("Laptop-123")
+        return restart_device("VPN Client")
+    if intent == "printer_error":
+        return restart_device("Printer")
     if intent == "account_locked":
         return unlock_account("user@example.com")
     return {"status": "skipped", "reason": "No mock action defined for intent"}
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the AI agent demo")
+def main():
+    parser = argparse.ArgumentParser(
+        description="AI agent demo for processing support tickets."
+    )
     parser.add_argument("--ticket", type=str, help="Ticket text to process")
-    parser.add_argument("--file", type=str, help="Path to a file containing the ticket text")
+    parser.add_argument("--file", type=str, help="Path to text file containing ticket")
     args = parser.parse_args()
 
-    # Load environment variables from .env if present.
-    load_dotenv()
-
-    # Determine the ticket content.
     if args.ticket:
         ticket = args.ticket
     elif args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
+        with open(args.file, "r") as f:
             ticket = f.read()
     else:
-        raise ValueError("Please provide either --ticket or --file")
+        raise SystemExit("Please provide a ticket using --ticket or --file")
 
-    print("\n=== Incoming Ticket ===")
+    print("=== Incoming Ticket ===")
     print(ticket)
-
-    # Classify the ticket.
     classification = classify_ticket(ticket)
     print("\n=== Classification ===")
     print(classification)
-
-    # Generate email response.
-    email = generate_email(ticket, classification.get("intent", "unknown"))
+    email = generate_email(ticket, classification["intent"])
     print("\n=== Email Response ===")
     print(email)
-
-    # Determine and display a simple action plan.
-    plan = plan_actions(classification.get("intent", ""))
-    if plan:
-        print("\n=== Action Plan ===")
-        print(plan)
-
-    # Execute mock action.
-    result = execute_mock_actions(classification.get("intent", ""))
+    plan = plan_actions(classification["intent"])
+    print("\n=== Action Plan ===")
+    print(plan)
+    result = execute_mock_actions(classification["intent"])
     print("\n=== Mock Action Result ===")
     print(result)
 
